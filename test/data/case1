@@ -1,9 +1,9 @@
-def pyfun(*args):
+def predict(*args):
     import pickle
     import numpy as np
-    import pandas as pd
     from sklearn.preprocessing import OneHotEncoder
     from sklearn.preprocessing import StandardScaler
+    from sklearn.linear_model import LogisticRegression
 
     scaler_path = '/home/test/model/expedia_standard_scale_model.pkl'
     enc_path = '/home/test/model/expedia_one_hot_encoder.pkl'
