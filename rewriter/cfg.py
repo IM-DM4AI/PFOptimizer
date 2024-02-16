@@ -1,29 +1,26 @@
 import ast
-import re
-
 import astunparse
-import pygraphviz
 
 
 class CFGNode(dict):
-    registry = 0
-    cache = {}
-    def __init__(self, parents, ast_node=None):
+    def __init__(self, parents, rid, ast_node=None):
         super().__init__()
         assert type(parents) is list
         self.parents = parents
-        self.calls = []
         self.children = []
         self.ast_node = ast_node
-        self.rid  = CFGNode.registry
-        CFGNode.cache[self.rid] = self
-        CFGNode.registry += 1
+        self.rid  = rid
+
+        # dynamic attributes
+        self.return_nodes = None
+        self.exit_nodes = None
 
     def lineno(self):
         return self.ast_node.lineno if hasattr(self.ast_node, 'lineno') else 0
 
     def __str__(self):
-        return "id:%d line[%d] parents: %s : %s" % (self.rid, self.lineno(), str([p.rid for p in self.parents]), self.source())
+        return ("id:%d line[%d] parents: %s : %s" %
+                (self.rid, self.lineno(), str([p.rid for p in self.parents]), self.source()))
 
     def __repr__(self):
         return str(self)
@@ -49,9 +46,6 @@ class CFGNode(dict):
         for p in ps:
             self.add_parent(p)
 
-    def add_calls(self, func):
-        self.calls.append(func)
-
     def source(self):
         return astunparse.unparse(self.ast_node).strip()
 
@@ -60,327 +54,273 @@ class CFGNode(dict):
             'id':self.rid,
             'parents': [p.rid for p in self.parents],
             'children': [c.rid for c in self.children],
-            'calls': self.calls, 'at':self.lineno() ,
-            'ast':self.source()
+            'source':self.source()
         }
 
-    @classmethod
-    def to_graph(cls, arcs=[]):
-        def unhack(v):
-            for i in ['if', 'while', 'for', 'elif']:
-                v = re.sub(r'^_%s:' % i, '%s:' % i, v)
-            return v
-        G = pygraphviz.AGraph(directed=True)
-        cov_lines = set(i for i,j in arcs)
-        for nid, cnode in CFGNode.cache.items():
-            G.add_node(cnode.rid)
-            n = G.get_node(cnode.rid)
-            lineno = cnode.lineno()
-            n.attr['label'] = "%d: %s" % (lineno, unhack(cnode.source()))
-            for pn in cnode.parents:
-                plineno = pn.lineno()
-                if hasattr(pn, 'calllink') and pn.calllink > 0 and not hasattr(cnode, 'calleelink'):
-                    G.add_edge(pn.rid, cnode.rid, style='dotted', weight=100)
-                    continue
-
-                if arcs:
-                    if  (plineno, lineno) in arcs:
-                        G.add_edge(pn.rid, cnode.rid, color='blue')
-                    elif plineno == lineno and lineno in cov_lines:
-                        G.add_edge(pn.rid, cnode.rid, color='blue')
-                    elif hasattr(cnode, 'fn_exit_node') and plineno in cov_lines:  # child is exit and parent is covered
-                        G.add_edge(pn.rid, cnode.rid, color='blue')
-                    elif hasattr(pn, 'fn_exit_node') and len(set(n.lineno() for n in pn.parents) | cov_lines) > 0: # parent is exit and one of its parents is covered.
-                        G.add_edge(pn.rid, cnode.rid, color='blue')
-                    elif plineno in cov_lines and hasattr(cnode, 'calleelink'): # child is a callee (has calleelink) and one of the parents is covered.
-                        G.add_edge(pn.rid, cnode.rid, color='blue')
-                    else:
-                        G.add_edge(pn.rid, cnode.rid, color='red')
-                else:
-                    G.add_edge(pn.rid, cnode.rid)
-        return G
-
-class PyCFG:
+class StmtCFG:
     def __init__(self):
-        self.founder = CFGNode(parents=[], ast_node=ast.parse('start').body[0]) # sentinel
-        self.founder.ast_node.lineno = 0
+        self.registry = 0
+        self.nodes = {}
+
+        self.starter = self.gen_node(parents=[], ast_node=ast.parse('start').body[0])
+        self.starter.ast_node.lineno = 0
         self.functions = {}
-        self.functions_node = {}
         self.last_node = None
+        self.code_ast = None
 
     def parse(self, src):
-        return ast.parse(src)
+        self.code_ast = ast.parse(src)
+        return self.code_ast
+
+    def gen_node(self, **kwargs):
+        kwargs["rid"] = self.registry
+        cfg_node = CFGNode(**kwargs)
+        self.registry += 1
+        self.nodes[cfg_node.rid] = cfg_node
+        return cfg_node
 
     def walk(self, node, myparents):
-        if node is None: return
+        if node is None:
+            return None
         fname = "on_%s" % node.__class__.__name__.lower()
         if hasattr(self, fname):
             fn = getattr(self, fname)
             v = fn(node, myparents)
             return v
         else:
-            return myparents
+            raise NotImplementedError(f"{fname} is not implemented")
 
     def on_module(self, node, myparents):
         """
-        Module(stmt* body)
+        Module(stmt* body, type_ignore* type_ignores)
         """
-        # each time a statement is executed unconditionally, make a link from
-        # the result to next statement
+
         p = myparents
         for n in node.body:
             p = self.walk(n, p)
         return p
 
-    def on_assign(self, node, myparents):
+    def on_functiondef(self, node, myparents):
         """
-        Assign(expr* targets, expr value)
-        TODO: AugAssign(expr target, operator op, expr value)
-        -- 'simple' indicates that we annotate simple name without parens
-        TODO: AnnAssign(expr target, expr annotation, expr? value, int simple)
+        FunctionDef(identifier name, arguments args,
+                       stmt* body, expr* decorator_list, expr? returns,
+                       string? type_comment, type_param* type_params)
         """
-        if len(node.targets) > 1: raise NotImplemented('Parallel assignments')
 
-        p = [CFGNode(parents=myparents, ast_node=node)]
-        p = self.walk(node.value, p)
+        fname = node.name
 
-        return p
+        func_node = self.gen_node(parents=[], ast_node=node)
+        func_node.return_nodes = []
 
-    def on_pass(self, node, myparents):
-        return [CFGNode(parents=myparents, ast_node=node)]
-
-    def on_break(self, node, myparents):
-        parent = myparents[0]
-        while not hasattr(parent, 'exit_nodes'):
-            # we have ordered parents
-            parent = parent.parents[0]
-
-        assert hasattr(parent, 'exit_nodes')
-        p = CFGNode(parents=myparents, ast_node=node)
-
-        # make the break one of the parents of label node.
-        parent.exit_nodes.append(p)
-
-        # break doesnt have immediate children
-        return []
-
-    def on_continue(self, node, myparents):
-        parent = myparents[0]
-        while not hasattr(parent, 'exit_nodes'):
-            # we have ordered parents
-            parent = parent.parents[0]
-        assert hasattr(parent, 'exit_nodes')
-        p = CFGNode(parents=myparents, ast_node=node)
-
-        # make continue one of the parents of the original test node.
-        parent.add_parent(p)
-
-        # return the parent because a continue is not the parent
-        # for the just next node
-        return []
-
-    def on_for(self, node, myparents):
-        #node.target in node.iter: node.body
-        _test_node = CFGNode(parents=myparents, ast_node=ast.parse('_for: True if %s else False' % astunparse.unparse(node.iter).strip()).body[0])
-        ast.copy_location(_test_node.ast_node, node)
-
-        # we attach the label node here so that break can find it.
-        _test_node.exit_nodes = []
-        test_node = self.walk(node.iter, [_test_node])
-
-        extract_node = CFGNode(parents=[_test_node], ast_node=ast.parse('%s = %s.shift()' % (astunparse.unparse(node.target).strip(), astunparse.unparse(node.iter).strip())).body[0])
-        ast.copy_location(extract_node.ast_node, _test_node.ast_node)
-
-        # now we evaluate the body, one at a time.
-        p1 = [extract_node]
+        p = [func_node]
         for n in node.body:
-            p1 = self.walk(n, p1)
+            p = self.walk(n, p)
 
-        # the test node is looped back at the end of processing.
-        _test_node.add_parents(p1)
+        for n in p:
+            if n not in func_node.return_nodes:
+                func_node.return_nodes.append(n)
 
-        return _test_node.exit_nodes + test_node
+        self.functions[fname] = func_node
 
-
-    def on_while(self, node, myparents):
-        # For a while, the earliest parent is the node.test
-        _test_node = CFGNode(parents=myparents, ast_node=ast.parse('_while: %s' % astunparse.unparse(node.test).strip()).body[0])
-        ast.copy_location(_test_node.ast_node, node.test)
-        _test_node.exit_nodes = []
-        test_node = self.walk(node.test, [_test_node])
-
-        # we attach the label node here so that break can find it.
-
-        # now we evaluate the body, one at a time.
-        p1 = test_node
-        for n in node.body:
-            p1 = self.walk(n, p1)
-
-        # the test node is looped back at the end of processing.
-        _test_node.add_parents(p1)
-
-        # link label node back to the condition.
-        return _test_node.exit_nodes + test_node
-
-    def on_if(self, node, myparents):
-        _test_node = CFGNode(parents=myparents, ast_node=ast.parse('_if: %s' % astunparse.unparse(node.test).strip()).body[0])
-        ast.copy_location(_test_node.ast_node, node.test)
-        test_node = self.walk(node.test, [_test_node])
-        g1 = test_node
-        for n in node.body:
-            g1 = self.walk(n, g1)
-        g2 = test_node
-        for n in node.orelse:
-            g2 = self.walk(n, g2)
-
-        return g1 + g2
-
-    def on_binop(self, node, myparents):
-        left = self.walk(node.left, myparents)
-        right = self.walk(node.right, left)
-        return right
-
-    def on_compare(self, node, myparents):
-        left = self.walk(node.left, myparents)
-        right = self.walk(node.comparators[0], left)
-        return right
-
-    def on_unaryop(self, node, myparents):
-        return self.walk(node.operand, myparents)
-
-    def on_call(self, node, myparents):
-        def get_func(node):
-            if type(node.func) is ast.Name:
-                mid = node.func.id
-            elif type(node.func) is ast.Attribute:
-                mid = node.func.attr
-            elif type(node.func) is ast.Call:
-                mid = get_func(node.func)
-            else:
-                raise Exception(str(type(node.func)))
-            return mid
-                #mid = node.func.value.id
-
-        p = myparents
-        for a in node.args:
-            p = self.walk(a, p)
-        mid = get_func(node)
-        myparents[0].add_calls(mid)
-
-        # these need to be unlinked later if our module actually defines these
-        # functions. Otherwsise we may leave them around.
-        # during a call, the direct child is not the next
-        # statement in text.
-        for c in p:
-            c.calllink = 0
-        return p
-
-    def on_expr(self, node, myparents):
-        p = [CFGNode(parents=myparents, ast_node=node)]
-        return self.walk(node.value, p)
+        return myparents
 
     def on_return(self, node, myparents):
+        """
+        Return(expr? value)
+        """
+
         parent = myparents[0]
 
-        val_node = self.walk(node.value, myparents)
         # on return look back to the function definition.
         while not hasattr(parent, 'return_nodes'):
             parent = parent.parents[0]
         assert hasattr(parent, 'return_nodes')
 
-        p = CFGNode(parents=val_node, ast_node=node)
+        p = self.gen_node(parents=myparents, ast_node=node)
 
-        # make the break one of the parents of label node.
+        # make the return one of the parents of label node.
         parent.return_nodes.append(p)
 
-        # return doesnt have immediate children
+        # return does not have immediate children
         return []
 
-    def on_functiondef(self, node, myparents):
-        # a function definition does not actually continue the thread of
-        # control flow
-        # name, args, body, decorator_list, returns
-        fname = node.name
-        args = node.args
-        returns = node.returns
+    def on_assign(self, node, myparents):
+        """
+        Assign(expr* targets, expr value, string? type_comment)
+        """
 
-        enter_node = CFGNode(parents=[], ast_node=ast.parse('enter: %s(%s)' % (node.name, ', '.join([a.arg for a in node.args.args]))).body[0]) # sentinel
-        enter_node.calleelink = True
-        ast.copy_location(enter_node.ast_node, node)
-        exit_node = CFGNode(parents=[], ast_node=ast.parse('exit: %s(%s)' % (node.name, ', '.join([a.arg for a in node.args.args]))).body[0]) # sentinel
-        exit_node.fn_exit_node = True
-        ast.copy_location(exit_node.ast_node, node)
-        enter_node.return_nodes = [] # sentinel
+        if len(node.targets) > 1:
+            raise NotImplementedError('Parallel assignments')
 
-        p = [enter_node]
+        p = [self.gen_node(parents=myparents, ast_node=node)]
+
+        return p
+
+    def on_augassign(self, node, myparents):
+        """
+        AugAssign(expr target, operator op, expr value)
+        """
+
+        p = [self.gen_node(parents=myparents, ast_node=node)]
+        return p
+
+    def on_for(self, node, myparents):
+        """
+        For(expr target, expr iter, stmt* body, stmt* orelse, string? type_comment)
+        """
+
+        if len(node.orelse) > 0:
+            raise NotImplementedError("For else usage not implemented")
+        for_node = self.gen_node(parents=myparents, ast_node=node)
+
+        # we attach the label node here so that break can find it.
+        for_node.exit_nodes = []
+
+        # now we evaluate the body, one at a time.
+        p1 = [for_node]
         for n in node.body:
-            p = self.walk(n, p)
+            p1 = self.walk(n, p1)
 
-        for n in p:
-            if n not in enter_node.return_nodes:
-                enter_node.return_nodes.append(n)
+        for_node.add_parents(p1)
 
-        for n in enter_node.return_nodes:
-            exit_node.add_parent(n)
+        return for_node.exit_nodes + p1
 
-        self.functions[fname] = [enter_node, exit_node]
-        self.functions_node[enter_node.lineno()] = fname
+    def on_while(self, node, myparents):
+        """
+        While(expr test, stmt* body, stmt* orelse)
+        """
 
-        return myparents
+        if len(node.orelse) > 0:
+            raise NotImplementedError("While else usage not implemented")
 
-    def get_defining_function(self, node):
-        if node.lineno() in self.functions_node: return self.functions_node[node.lineno()]
-        if not node.parents:
-            self.functions_node[node.lineno()] = ''
-            return ''
-        val = self.get_defining_function(node.parents[0])
-        self.functions_node[node.lineno()] = val
-        return val
-
-    def link_functions(self):
-        for nid,node in CFGNode.cache.items():
-            if node.calls:
-                for calls in node.calls:
-                    if calls in self.functions:
-                        enter, exit = self.functions[calls]
-                        enter.add_parent(node)
-                        if node.children:
-                            # # until we link the functions up, the node
-                            # # should only have succeeding node in text as
-                            # # children.
-                            # assert(len(node.children) == 1)
-                            # passn = node.children[0]
-                            # # We require a single pass statement after every
-                            # # call (which means no complex expressions)
-                            # assert(type(passn.ast_node) == ast.Pass)
-
-                            # # unlink the call statement
-                            assert node.calllink > -1
-                            node.calllink += 1
-                            for i in node.children:
-                                i.add_parent(exit)
-                            # passn.set_parents([exit])
-                            # ast.copy_location(exit.ast_node, passn.ast_node)
+        while_node = self.gen_node(parents=myparents, ast_node=node)
 
 
-                            # #for c in passn.children: c.add_parent(exit)
-                            # #passn.ast_node = exit.ast_node
+        # we attach the label node here so that break can find it.
+        while_node.exit_nodes = []
 
-    def update_functions(self):
-        for nid,node in CFGNode.cache.items():
-            _n = self.get_defining_function(node)
+        # now we evaluate the body, one at a time.
+        p1 = [while_node]
+        for n in node.body:
+            p1 = self.walk(n, p1)
+
+        while_node.add_parents(p1)
+
+        return while_node.exit_nodes + p1
+
+    def on_if(self, node, myparents):
+        """
+        If(expr test, stmt* body, stmt* orelse)
+        """
+
+        if_node = self.gen_node(parents=myparents, ast_node=node)
+        ast.copy_location(if_node.ast_node, node.test)
+        g1 = [if_node]
+        for n in node.body:
+            g1 = self.walk(n, g1)
+        g2 = [if_node]
+        for n in node.orelse:
+            g2 = self.walk(n, g2)
+
+        return g1 + g2
+
+    def on_with(self, node, myparents):
+        """
+        With(withitem* items, stmt* body, string? type_comment)
+        """
+
+        p = [self.gen_node(parents=myparents, ast_node=node)]
+        for n in node.body:
+            p = self.walk(n,p)
+        return p
+
+    def on_import(self, node, myparents):
+        """
+        Import(alias* names)
+        """
+
+        p = self.gen_node(parents=myparents, ast_node=node)
+        return [p]
+
+    def on_importfrom(self, node, myparents):
+        """
+        ImportFrom(identifier? module, alias* names, int? level)
+        """
+
+        p = self.gen_node(parents=myparents, ast_node=node)
+        return [p]
+
+    def on_expr(self, node, myparents):
+        """
+        Expr(expr value)
+        """
+
+        p = [self.gen_node(parents=myparents, ast_node=node)]
+        return p
+
+    def on_pass(self, node, myparents):
+        """
+        Pass
+        """
+
+        return [self.gen_node(parents=myparents, ast_node=node)]
+
+    def on_break(self, node, myparents):
+        """
+        Break
+        """
+
+        parent = myparents[0]
+        while not hasattr(parent, 'exit_nodes'):
+            # we have ordered parents
+            parent = parent.parents[0]
+
+        assert hasattr(parent, 'exit_nodes')
+        p = self.gen_node(parents=myparents, ast_node=node)
+
+        # make the break one of the parents of original test node.
+        parent.exit_nodes.append(p)
+
+        # break does not have immediate children
+        return []
+
+    def on_continue(self, node, myparents):
+        """
+        continue
+        """
+
+        parent = myparents[0]
+        while not hasattr(parent, 'exit_nodes'):
+            # we have ordered parents
+            parent = parent.parents[0]
+        assert hasattr(parent, 'exit_nodes')
+        p = self.gen_node(parents=myparents, ast_node=node)
+
+        # make continue one of the parents of the original test node.
+        parent.add_parent(p)
+
+        # return the parent because a stmt continue is not the parent
+        # for the just next node
+        return []
 
     def update_children(self):
-        for nid,node in CFGNode.cache.items():
+        for nid,node in self.nodes.items():
             for p in node.parents:
                 p.add_child(node)
 
-    def gen_cfg(self, src):
-        node = self.parse(src)
-        nodes = self.walk(node, [self.founder])
-        self.last_node = CFGNode(parents=nodes, ast_node=ast.parse('stop').body[0])
-        ast.copy_location(self.last_node.ast_node, self.founder.ast_node)
-        self.update_children()
-        self.update_functions()
-        self.link_functions()
+    def get_function_by_name(self, name):
+        """
+        :param name:
+        :return: the function def head node.
+        """
+        return self.functions[name]
 
+    @classmethod
+    def gen_cfg(cls, src):
+        cfg = cls()
+        node = cfg.parse(src)
+        nodes = cfg.walk(node, [cfg.starter])
+        cfg.last_node = cfg.gen_node(parents=nodes, ast_node=ast.parse('stop').body[0])
+        ast.copy_location(cfg.last_node.ast_node, cfg.starter.ast_node)
+        cfg.update_children()
+        return cfg
