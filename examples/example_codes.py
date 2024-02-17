@@ -27,4 +27,5 @@ while a < 100:
     else:
         break
     a = a + 1
+b = b + 1
 '''

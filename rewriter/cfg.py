@@ -132,9 +132,9 @@ class StmtCFG:
         parent = myparents[0]
 
         # on return look back to the function definition.
-        while not hasattr(parent, 'return_nodes'):
+        while parent.return_nodes is None:
             parent = parent.parents[0]
-        assert hasattr(parent, 'return_nodes')
+        assert parent.return_nodes is not None
 
         p = self.gen_node(parents=myparents, ast_node=node)
 
@@ -271,11 +271,11 @@ class StmtCFG:
         """
 
         parent = myparents[0]
-        while not hasattr(parent, 'exit_nodes'):
+        while parent.exit_nodes is None:
             # we have ordered parents
             parent = parent.parents[0]
 
-        assert hasattr(parent, 'exit_nodes')
+        assert parent.exit_nodes is not None
         p = self.gen_node(parents=myparents, ast_node=node)
 
         # make the break one of the parents of original test node.
@@ -290,10 +290,10 @@ class StmtCFG:
         """
 
         parent = myparents[0]
-        while not hasattr(parent, 'exit_nodes'):
+        while parent.exit_nodes is None:
             # we have ordered parents
             parent = parent.parents[0]
-        assert hasattr(parent, 'exit_nodes')
+        assert parent.exit_nodes is not None
         p = self.gen_node(parents=myparents, ast_node=node)
 
         # make continue one of the parents of the original test node.
