@@ -105,5 +105,5 @@ wheel=0.41.2=py311hecd8cb5_0
 xz=5.4.5=h6c40b1e_0
 zlib=1.2.13=h4dc903c_0
 zstd=1.5.5=hc035e20_0
-
 astunparse~=1.6.3
+pygraphviz~=1.9
