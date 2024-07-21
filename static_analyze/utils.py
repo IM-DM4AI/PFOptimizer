@@ -1,5 +1,5 @@
 import pygraphviz
-from rewriter.cfg import StmtCFG
+from static_analyze.cfg import StmtCFG
 from examples.example_codes import aWhileLoop
 
 def stmt_cfg_viz(cfg: StmtCFG):

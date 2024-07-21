@@ -2,7 +2,7 @@ import unittest
 from pathlib import Path
 
 from examples.example_codes import aForLoop, aIf, aWhileLoop, pAssign
-from rewriter.cfg import StmtCFG
+from static_analyze.cfg import StmtCFG
 
 DATA_PATH = Path(__file__).parent / 'data'
 
