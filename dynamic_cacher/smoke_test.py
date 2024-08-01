@@ -1,4 +1,4 @@
-import my_importer
+import dycacher
 
 def predict(*args):
     import pickle

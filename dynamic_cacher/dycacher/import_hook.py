@@ -56,8 +56,6 @@ def when_imported(fullname):
         return func
     return decorate
 
-sys.meta_path.insert(0, PostImportFinder())
-
 def capture_arguments(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
@@ -81,10 +79,6 @@ def capture_arguments(func):
             return ret
         
     return wrapper
-
-@when_imported('pickle')
-def replace_decorate(mod):
-    mod.load = capture_arguments(mod.load)
 
 # another way for import hooking
 # import builtins
