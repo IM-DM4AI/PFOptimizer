@@ -5,12 +5,6 @@
 int main() {
     Py_Initialize(); 
 
-    // pre-import the inference context reuse cache once before iterative UDF invocation (e.g. plan time)
-    PyObject *dycacher = PyImport_ImportModule("dycacher");
-    if (!dycacher) {
-        PyErr_Print();
-    }
-
     // load udf code, construct call object
     PyObject *sys = PyImport_ImportModule("sys");
     PyObject *path = PyObject_GetAttrString(sys,"path");
@@ -27,7 +21,6 @@ int main() {
         printf("ERROR:function predict not found or not callable\n");
         return 1;
     }
-
 
     // simulate the iterative process of UDF invocation
     PyObject *pValue;
@@ -51,7 +44,6 @@ int main() {
 
     Py_DECREF(pFunc);
     Py_DECREF(pModule);
-    Py_DECREF(dycacher);
 
 
     Py_Finalize();
