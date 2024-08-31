@@ -49,8 +49,21 @@ int main() {
 
     std::cout<< duration <<"ms"<<std::endl;
 
+    // maybe clear the cache after query execution done.
+    PyObject *clearFunc = PyObject_GetAttrString(dycacher,"reset_cache");
+    if(!clearFunc || !PyCallable_Check(clearFunc))
+    {
+        PyErr_Print();
+        printf("ERROR:function reset_cache not found or not callable\n");
+        return 1;
+    }
+
+    PyObject *cValue = PyObject_CallObject(clearFunc,NULL);
+
+    Py_DECREF(cValue);
     Py_DECREF(pFunc);
     Py_DECREF(pModule);
+    Py_DECREF(clearFunc);
     Py_DECREF(dycacher);
 
 

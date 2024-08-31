@@ -6,24 +6,11 @@ import sys
 from collections import defaultdict
 import io
 
+from dycacher.comparable import ComparableFileObject
+
 _post_import_hooks = defaultdict(list)
 
 API_CACHE = defaultdict(dict)
-
-
-class ComparableFileObject(object):
-
-    def __init__(self, path) -> None:
-        self.path = path
-
-    def __eq__(self, value: object) -> bool:
-        if not isinstance(value, ComparableFileObject):
-            return False
-        
-        return self.path == value.path
-    
-    def __hash__(self) -> int:
-        return hash((self.path))
 
 class PostImportFinder:
     def __init__(self):
@@ -73,12 +60,16 @@ def capture_arguments(func):
         if lookup_args in func_namespace.keys():
             return func_namespace[lookup_args]
         else:
-            print('Calling', func.__name__, args, kwargs)
+            # print('Calling', func.__name__, args, kwargs)
             ret = func(*args, **kwargs)
             func_namespace[lookup_args] = ret             
             return ret
         
     return wrapper
+
+
+def reset_cache():
+    API_CACHE.clear()
 
 # another way for import hooking
 # import builtins
