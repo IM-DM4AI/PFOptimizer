@@ -6,7 +6,7 @@ import sys
 from collections import defaultdict
 import io
 
-from dycacher.comparable import ComparableFileObject
+from dycacher.comparable import ComparableFileObject, ComparableONNXConfig
 
 _post_import_hooks = defaultdict(list)
 
@@ -49,24 +49,46 @@ def capture_arguments(func):
         lookup_args = []
         for elem in args:
             if isinstance(elem, io.BufferedReader):
-                lookup_args.append(ComparableFileObject(elem.name))
+                lookup_args.append(ComparableFileObject(elem.name, elem.tell()))
             else:
                 lookup_args.append(elem)
+
+        for key, value in kwargs.items():
+            comp_value = value
+            if isinstance(value, io.BufferedReader):
+                comp_value = ComparableFileObject(elem.name, elem.tell())
         
-        func_namespace = API_CACHE[func.__name__]
+            lookup_args.append((key, comp_value))
+        
+        func_namespace = API_CACHE[id(func)]
 
         lookup_args = tuple(lookup_args)
 
         if lookup_args in func_namespace.keys():
             return func_namespace[lookup_args]
         else:
-            # print('Calling', func.__name__, args, kwargs)
-            ret = func(*args, **kwargs)
+            call_kw_args = dict()
+            for key, value in kwargs.items():
+                call_value = value
+                if isinstance(value, ComparableONNXConfig):
+                    call_value = value.config
+                call_kw_args[key] = call_value
+
+            print('Calling', func.__name__, args, kwargs)
+            ret = func(*args, **call_kw_args)
+            print("context object:", ret)
             func_namespace[lookup_args] = ret             
             return ret
         
     return wrapper
 
+
+def wrap_onnx_config_class(cls):
+    @wraps(cls)
+    def wrapper(*args, **kwargs):
+        return ComparableONNXConfig(cls(*args, **kwargs))
+
+    return wrapper
 
 def reset_cache():
     API_CACHE.clear()
