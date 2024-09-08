@@ -1,5 +1,6 @@
-# Prediction Function Rewriter of IMBridge
-A python prediction function code rewrite for inference context setup hoisting.
+# Prediction Function Optimizer of IMBridge
+A python prediction function optimizer for automatic runtime prediction query optimization.
 
-# Algorithm Detatils
-TBD
+# Optimization Detatils
+## Runtime Inference Context Reuse Cache
+TBD.
