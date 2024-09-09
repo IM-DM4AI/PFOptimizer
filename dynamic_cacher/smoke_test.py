@@ -12,6 +12,7 @@ def predict(*args):
     import onnxruntime as ort
     import joblib
     import lightgbm as lgb
+    import xgboost as xgb
 
     scaler_path = f'{script_path}/models/expedia_standard_scale_model.pkl'
     enc_path = f'{script_path}/models/expedia_one_hot_encoder.pkl'
@@ -19,6 +20,7 @@ def predict(*args):
     model_path2 = f'{script_path}/models/uc06.python.model'
     model_path3 = f'{script_path}/models/expedia_dt_pipeline.onnx'
     model_path4 = f'{script_path}/models/creditcard_lgb_model.txt'
+    model_path5 = f'{script_path}/models/creditcard_xgb_model.json'
 
     ortconfig = ort.SessionOptions()
     expedia_onnx_session = ort.InferenceSession(model_path3, sess_options=ortconfig)
@@ -33,6 +35,11 @@ def predict(*args):
         uc06_model = joblib.load(model_path2)
 
     lgbm_model = lgb.Booster(model_file=model_path4)
+
+    xgb_model = xgb.Booster()
+    xgb_model.load_model(model_path5)
+
+    xgb_model = xgb.Booster(model_file=model_path5)
 
 import time
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 # define and add dynamic context ruses rules
-from dycacher.import_hook import capture_arguments 
+import types
+from dycacher.import_hook import capture_arguments, decorate_instance_method
 from dycacher.import_hook import when_imported, wrap_onnx_config_class
 
 @when_imported('pickle')
@@ -17,9 +18,14 @@ def rule_ort(mod):
 
 @when_imported('xgboost')
 def rule_xgboost(mod):
-    pass
+    mod.Booster = decorate_instance_method(mod.Booster, "load_model", capture_arguments)
+    mod.Booster = capture_arguments(mod.Booster)
 
 @when_imported('lightgbm')
 def rule_lightgbm(mod):
     mod.Booster = capture_arguments(mod.Booster)
+
+@when_imported('tensorflow')
+def rule_tensorflow(mod):
+    mod.keras.models.load_model = capture_arguments(mod.keras.models.load_model)
  

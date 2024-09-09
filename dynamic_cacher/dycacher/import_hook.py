@@ -5,8 +5,10 @@ import importlib
 import sys
 from collections import defaultdict
 import io
+import types
 
 from dycacher.comparable import ComparableFileObject, ComparableONNXConfig
+import inspect
 
 _post_import_hooks = defaultdict(list)
 
@@ -51,7 +53,8 @@ def capture_arguments(func):
             if isinstance(elem, io.BufferedReader):
                 lookup_args.append(ComparableFileObject(elem.name, elem.tell()))
             else:
-                lookup_args.append(elem)
+                if not hasattr(elem, "_first_self_"):
+                    lookup_args.append(elem)
 
         for key, value in kwargs.items():
             comp_value = value
@@ -60,12 +63,31 @@ def capture_arguments(func):
         
             lookup_args.append((key, comp_value))
         
-        func_namespace = API_CACHE[id(func)]
+        if isinstance(func, types.MethodType):
+            func_namespace = API_CACHE[id(func.__func__)]
+        else:
+            func_namespace = API_CACHE[id(func)]
 
         lookup_args = tuple(lookup_args)
 
         if lookup_args in func_namespace.keys():
-            return func_namespace[lookup_args]
+            context_state = func_namespace[lookup_args]
+            if isinstance(func, types.MethodType):
+                context_object = context_state[0]
+
+                caller_frame = inspect.stack()[1].frame
+                target_key = None
+                for k, v in caller_frame.f_locals.items():
+                    if v is func.__self__:
+                        target_key = k
+                        break
+                
+                caller_frame.f_locals[target_key] = context_object
+                context_ret = context_state[1]
+            else:
+                context_ret = context_state
+                
+            return context_ret
         else:
             call_kw_args = dict()
             for key, value in kwargs.items():
@@ -77,7 +99,10 @@ def capture_arguments(func):
             print('Calling', func.__name__, args, kwargs)
             ret = func(*args, **call_kw_args)
             print("context object:", ret)
-            func_namespace[lookup_args] = ret             
+            if isinstance(func, types.MethodType):
+                func_namespace[lookup_args] = (func.__self__, ret)
+            else:
+                func_namespace[lookup_args] = ret             
             return ret
         
     return wrapper
@@ -88,6 +113,17 @@ def wrap_onnx_config_class(cls):
     def wrapper(*args, **kwargs):
         return ComparableONNXConfig(cls(*args, **kwargs))
 
+    return wrapper
+
+def decorate_instance_method(cls, method, func):
+    @wraps(cls)
+    def wrapper(*args, **kwargs):
+        instance = cls(*args, **kwargs)
+        replace = getattr(instance, method)
+        replace = func(replace)
+        setattr(instance, method, replace)
+        return instance
+    
     return wrapper
 
 def reset_cache():
