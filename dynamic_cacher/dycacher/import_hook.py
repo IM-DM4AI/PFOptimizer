@@ -53,8 +53,7 @@ def capture_arguments(func):
             if isinstance(elem, io.BufferedReader):
                 lookup_args.append(ComparableFileObject(elem.name, elem.tell()))
             else:
-                if not hasattr(elem, "_first_self_"):
-                    lookup_args.append(elem)
+                lookup_args.append(elem)
 
         for key, value in kwargs.items():
             comp_value = value
