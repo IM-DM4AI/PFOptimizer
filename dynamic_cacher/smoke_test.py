@@ -13,6 +13,7 @@ def predict(*args):
     import joblib
     import lightgbm as lgb
     import xgboost as xgb
+    import tensorflow as tf
 
     scaler_path = f'{script_path}/models/expedia_standard_scale_model.pkl'
     enc_path = f'{script_path}/models/expedia_one_hot_encoder.pkl'
@@ -21,6 +22,7 @@ def predict(*args):
     model_path3 = f'{script_path}/models/expedia_dt_pipeline.onnx'
     model_path4 = f'{script_path}/models/creditcard_lgb_model.txt'
     model_path5 = f'{script_path}/models/creditcard_xgb_model.json'
+    model_path6 = f'{script_path}/models/tensorflow_mlp_hospital.keras'
 
     ortconfig = ort.SessionOptions()
     expedia_onnx_session = ort.InferenceSession(model_path3, sess_options=ortconfig)
@@ -41,10 +43,14 @@ def predict(*args):
 
     xgb_model = xgb.Booster(model_file=model_path5)
 
+    tf_model = tf.keras.models.load_model(model_path6)
+
+    tf_model.predict(tf.constant([np.zeros(40)]), verbose=False)
+
 import time
 if __name__ == "__main__":
     start = time.perf_counter()
-    for i in range(100):
+    for i in range(1000):
         predict()
 
     end = time.perf_counter()
