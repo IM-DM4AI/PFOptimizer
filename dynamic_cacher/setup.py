@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='dycacher',
-    version='0.95',
+    version='0.98',
     packages=find_packages(),
     url='',
     license='',

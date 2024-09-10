@@ -1,7 +1,10 @@
 import dycacher
 import os
+import pickle
 
 script_path = os.path.dirname(__file__)
+
+import torch.nn as nn
 
 def predict(*args):
     import pickle
@@ -14,6 +17,14 @@ def predict(*args):
     import lightgbm as lgb
     import xgboost as xgb
     import tensorflow as tf
+    import torch
+
+    class SimpleLinearModel(nn.Module):
+        def __init__(self):
+            super(SimpleLinearModel, self).__init__()
+            self.linear = nn.Linear(1, 1)
+        def forward(self, x):
+            return self.linear(x)
 
     scaler_path = f'{script_path}/models/expedia_standard_scale_model.pkl'
     enc_path = f'{script_path}/models/expedia_one_hot_encoder.pkl'
@@ -23,6 +34,8 @@ def predict(*args):
     model_path4 = f'{script_path}/models/creditcard_lgb_model.txt'
     model_path5 = f'{script_path}/models/creditcard_xgb_model.json'
     model_path6 = f'{script_path}/models/tensorflow_mlp_hospital.keras'
+    model_path7 = f'{script_path}/models/torch_full_model.pth'
+    model_path8 = f'{script_path}/models/torch_model.pth'
 
     ortconfig = ort.SessionOptions()
     expedia_onnx_session = ort.InferenceSession(model_path3, sess_options=ortconfig)
@@ -45,7 +58,20 @@ def predict(*args):
 
     tf_model = tf.keras.models.load_model(model_path6)
 
-    tf_model.predict(tf.constant([np.zeros(40)]), verbose=False)
+    # tf_model.predict(tf.constant([np.zeros(40)]), verbose=False)
+
+    # need to add model class declaration at the global scope
+    # torch_model = torch.load(model_path7)
+
+    tc_model = SimpleLinearModel()
+    tc_model.load_state_dict(torch.load(model_path8, weights_only=True))
+    tc_model.eval()
+
+    # with torch.no_grad():
+    #     sample_input = torch.tensor(np.array([[1.0], [2.0], [3.0]], dtype=np.float32), dtype=torch.float32)
+    #     prediction = tc_model(sample_input)
+    #     print(prediction)
+
 
 import time
 if __name__ == "__main__":

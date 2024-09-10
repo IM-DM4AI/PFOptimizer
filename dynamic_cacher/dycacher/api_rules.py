@@ -28,4 +28,8 @@ def rule_lightgbm(mod):
 @when_imported('tensorflow')
 def rule_tensorflow(mod):
     mod.keras.models.load_model = capture_arguments(mod.keras.models.load_model)
+
+@when_imported('torch')
+def rule_torch(mod):
+    mod.load = capture_arguments(mod.load)
  
