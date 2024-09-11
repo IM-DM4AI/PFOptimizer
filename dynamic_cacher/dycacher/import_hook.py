@@ -45,7 +45,7 @@ def when_imported(fullname):
         return func
     return decorate
 
-def capture_arguments(func):
+def reuse_checking(func):
     @wraps(func)
     def wrapper(*args, **kwargs):
         lookup_args = []
