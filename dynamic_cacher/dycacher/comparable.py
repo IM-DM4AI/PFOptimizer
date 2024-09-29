@@ -25,4 +25,20 @@ class ComparableONNXConfig(object):
     
     def __hash__(self) -> int:
         return hash("ort config")
+    
+    @property
+    def inter_op_num_threads(self):
+        return self.config.inter_op_num_threads
+    
+    @inter_op_num_threads.setter
+    def inter_op_num_threads(self, value):
+        self.config.inter_op_num_threads = value
+
+    @property
+    def intra_op_num_threads(self):
+        return self.config.intra_op_num_threads
+    
+    @intra_op_num_threads.setter
+    def intra_op_num_threads(self, value):
+        self.config.intra_op_num_threads = value
 
