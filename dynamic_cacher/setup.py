@@ -6,7 +6,7 @@ setup(
     packages=find_packages(),
     url='',
     license='',
-    author='AhoyZhang',
+    author='xxx',
     python_requires=">=3.8",
     author_email='',
     description='Dynamic cache-based reuse for one-off inference context setup in IMBridge.',
