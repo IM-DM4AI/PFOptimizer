@@ -5,6 +5,7 @@ import importlib
 import sys
 from collections import defaultdict
 import io
+import threading
 import types
 
 from dycacher.comparable import ComparableFileObject, ComparableONNXConfig
@@ -13,6 +14,9 @@ import inspect
 _post_import_hooks = defaultdict(list)
 
 API_CACHE = defaultdict(dict)
+CACHE_LOCK = threading.Lock()
+global_thread_id = 0
+
 
 class PostImportFinder:
     def __init__(self):
@@ -103,9 +107,24 @@ def reuse_checking(func):
             else:
                 func_namespace[lookup_args] = ret             
             return ret
-        
-    return wrapper
 
+    @wraps(wrapper)
+    def wrapper_with_lock(*args, **kwargs):
+        global global_thread_id
+        local_thread_id = threading.get_ident()
+        # print(local_thread_id)
+        if CACHE_LOCK.locked() and local_thread_id == global_thread_id:
+            ret = wrapper(*args, **kwargs)
+        else:
+            CACHE_LOCK.acquire()
+            global_thread_id = threading.get_ident()
+            ret = wrapper(*args, **kwargs)
+            global_thread_id = 0
+            CACHE_LOCK.release()
+        
+        return ret
+    
+    return wrapper_with_lock
 
 def wrap_onnx_config_class(cls):
     @wraps(cls)
