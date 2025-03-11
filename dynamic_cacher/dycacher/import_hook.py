@@ -211,12 +211,15 @@ def close_shm():
         pass
 
 def try_to_load_cache():
+    # If cache is not empty, no need load cache from shared memory or disk.
     if(len(API_CACHE) > 0):
         return False
     try:
+        # Try to load cache from shared memory
         load_from_shm()
-        return False
+        return False # No need to load cache from disk
     except FileNotFoundError:
+        # No shared memory can laod, return True to indicate that it should load model from disk
         return True
 
 
