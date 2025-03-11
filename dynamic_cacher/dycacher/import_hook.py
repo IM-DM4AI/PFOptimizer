@@ -7,16 +7,31 @@ from collections import defaultdict
 import io
 import threading
 import types
+from enum import Enum, auto
 
 from dycacher.comparable import ComparableFileObject, ComparableONNXConfig
 import inspect
 
 _post_import_hooks = defaultdict(list)
 
+API_RULE_MAPPING = defaultdict(dict)
+
 API_CACHE = defaultdict(dict)
 CACHE_LOCK = threading.Lock()
 global_thread_id = 0
 
+SHM_CACHE_NAME = "dycacher_shm_cache"
+
+SHM_CACHE_SIZE = 1024*1024*1024
+
+class CacheRules(Enum):
+    PICKLE = auto()
+    JOBLIB = auto()
+    ONNXRUNTIME = auto()
+    XGBOOST = auto()
+    LIGHTGBM = auto()
+    TENSORFLOW = auto()
+    TORCH = auto()
 
 class PostImportFinder:
     def __init__(self):
@@ -49,7 +64,7 @@ def when_imported(fullname):
         return func
     return decorate
 
-def reuse_checking(func):
+def reuse_checking(func, rules):
     @wraps(func)
     def wrapper(*args, **kwargs):
         lookup_args = []
@@ -66,10 +81,11 @@ def reuse_checking(func):
         
             lookup_args.append((key, comp_value))
         
-        if isinstance(func, types.MethodType):
-            func_namespace = API_CACHE[id(func.__func__)]
-        else:
-            func_namespace = API_CACHE[id(func)]
+        func_id = id(func.__func__) if isinstance(func, types.MethodType) else id(func)
+
+        API_RULE_MAPPING[func_id] = rules
+        
+        func_namespace = API_CACHE[rules]
 
         lookup_args = tuple(lookup_args)
 
@@ -99,9 +115,9 @@ def reuse_checking(func):
                     call_value = value.config
                 call_kw_args[key] = call_value
 
-            print('Calling', func.__name__, args, kwargs)
+            # print('Calling', func.__name__, args, kwargs)
             ret = func(*args, **call_kw_args)
-            print("context object:", ret)
+            # print("context object:", ret)
             if isinstance(func, types.MethodType):
                 func_namespace[lookup_args] = (func.__self__, ret)
             else:
@@ -146,6 +162,66 @@ def decorate_instance_method(cls, method, func):
 
 def reset_cache():
     API_CACHE.clear()
+
+def write_to_shm():
+    from multiprocessing.shared_memory import SharedMemory
+    import pickle
+    import struct
+    global API_CACHE
+
+    try:
+        shm = SharedMemory(name=SHM_CACHE_NAME)
+    except FileNotFoundError:
+        shm = SharedMemory(name=SHM_CACHE_NAME, create=True, size=SHM_CACHE_SIZE)
+
+    bi_cache = pickle.dumps(API_CACHE)
+    bi_cache_size = len(bi_cache)
+    if bi_cache_size > shm.size:
+        raise ValueError("SharedMemory size is too small")
+    
+    int_size = struct.calcsize('I')
+
+    shm.buf[:int_size] = struct.pack('I', bi_cache_size)
+    shm.buf[int_size: int_size+bi_cache_size] = bi_cache
+    shm.close()
+
+def load_from_shm():
+    from multiprocessing.shared_memory import SharedMemory
+    import pickle
+    import struct
+
+    shm = SharedMemory(name=SHM_CACHE_NAME)
+
+    int_size = struct.calcsize('I')
+
+    bi_cache_size = struct.unpack('I', shm.buf[:int_size])[0]
+    cache = pickle.loads(shm.buf[int_size: int_size+bi_cache_size])
+
+    global API_CACHE
+    API_CACHE = cache
+    shm.close()
+
+def close_shm():
+    from multiprocessing.shared_memory import SharedMemory
+    try:
+        shm = SharedMemory(name=SHM_CACHE_NAME)
+        shm.close()
+        shm.unlink()
+    except FileNotFoundError:
+        pass
+
+def try_to_load_cache():
+    if(len(API_CACHE) > 0):
+        return False
+    try:
+        load_from_shm()
+        return False
+    except FileNotFoundError:
+        return True
+
+
+import atexit
+atexit.register(close_shm)
 
 # another way for import hooking
 # import builtins
