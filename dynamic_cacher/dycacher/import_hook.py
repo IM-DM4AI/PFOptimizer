@@ -7,14 +7,11 @@ from collections import defaultdict
 import io
 import threading
 import types
-from enum import Enum, auto
 
 from dycacher.comparable import ComparableFileObject, ComparableONNXConfig
 import inspect
 
 _post_import_hooks = defaultdict(list)
-
-API_RULE_MAPPING = defaultdict(dict)
 
 API_CACHE = defaultdict(dict)
 CACHE_LOCK = threading.Lock()
@@ -23,15 +20,6 @@ global_thread_id = 0
 SHM_CACHE_NAME = "dycacher_shm_cache"
 
 SHM_CACHE_SIZE = 1024*1024*1024
-
-class CacheRules(Enum):
-    PICKLE = auto()
-    JOBLIB = auto()
-    ONNXRUNTIME = auto()
-    XGBOOST = auto()
-    LIGHTGBM = auto()
-    TENSORFLOW = auto()
-    TORCH = auto()
 
 class PostImportFinder:
     def __init__(self):
@@ -64,7 +52,9 @@ def when_imported(fullname):
         return func
     return decorate
 
-def reuse_checking(func, rules):
+def reuse_checking(func):
+    module = inspect.getmodule(func)
+    global_api_id =  module.__name__ + "." + func.__name__
     @wraps(func)
     def wrapper(*args, **kwargs):
         lookup_args = []
@@ -81,11 +71,7 @@ def reuse_checking(func, rules):
         
             lookup_args.append((key, comp_value))
         
-        func_id = id(func.__func__) if isinstance(func, types.MethodType) else id(func)
-
-        API_RULE_MAPPING[func_id] = rules
-        
-        func_namespace = API_CACHE[rules]
+        func_namespace = API_CACHE[global_api_id]
 
         lookup_args = tuple(lookup_args)
 
@@ -223,8 +209,6 @@ def try_to_load_cache():
         return True
 
 
-import atexit
-atexit.register(close_shm)
 
 # another way for import hooking
 # import builtins
