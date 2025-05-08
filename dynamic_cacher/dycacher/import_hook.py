@@ -36,7 +36,18 @@ class PostImportLoader:
         self._finder = finder
 
     def load_module(self, fullname):
-        importlib.import_module(fullname)
+        # print(fullname)
+        # fixme: since frameworks like transformers use lazy import 
+        # we have to try certain times to ensure successful import
+        while True:
+            try:
+                importlib.import_module(fullname)
+                break
+            except ImportError as ie:
+                raise ie
+            except RuntimeError as re:
+                continue
+        
         module = sys.modules[fullname]
         for func in _post_import_hooks[fullname]:
             func(module)
