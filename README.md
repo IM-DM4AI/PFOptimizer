@@ -3,7 +3,10 @@ A python prediction function optimizer for automatic runtime prediction query op
 
 # Optimization Detatils
 ## Runtime Inference Context Reuse Cache
-The installation wheel is in the 'dynamic_cacher/release' directory.
+The runtime dynamic cache implementation lives in `dynamic_cacher/`.
+
+- Detailed docs: `dynamic_cacher/README.md`
+- Installation wheel: `dynamic_cacher/release`
 
 Design rationales are showd in paper.
 
